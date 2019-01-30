@@ -20,7 +20,7 @@ func ExecutePipeline(jobs ...job) {
 		go func(in, out chan interface{}, someJob job) {
 			defer wg.Done()
 			someJob(in, out)
-			close(out)
+			//close(out)
 		}(in, out, someJob)
 		in = out
 		out = make(chan interface{})
@@ -60,8 +60,11 @@ func SingleHash(in, out chan interface{}) {
 		go md5Proc(data, quotaMd5Ch, md5Ch)
 		go crc32Proc(data, crc32Ch1)
 		go crc32Proc(<-md5Ch, crc32Ch2)
-		responseBuilder(crc32Ch1, crc32Ch2)
+		go responseBuilder(crc32Ch1, crc32Ch2)
 		dataCounter++
+		md5Ch = make(chan string)
+		crc32Ch1 = make(chan string)
+		crc32Ch2 = make(chan string)
 	}
 }
 
@@ -70,6 +73,11 @@ func MultiHash(in, out chan interface{}) {
 	var (
 		chs [countHash]chan string
 
+		initChs = func(chs [countHash]chan string) {
+			for i := range chs {
+				chs[i] = make(chan string)
+			}
+		}
 		crc32Proc = func(thRaw int, data string, crc32Ch chan string) {
 			th := strconv.Itoa(thRaw)
 			signCrc32 := DataSignerCrc32(th + data)
@@ -85,15 +93,14 @@ func MultiHash(in, out chan interface{}) {
 			out <- result
 		}
 	)
-	for i := range chs {
-		chs[i] = make(chan string)
-	}
+	initChs(chs)
 	for dataRaw := range in {
 		data := dataRaw.(string)
 		for i := 0; i < countHash; i++ {
 			go crc32Proc(i, data, chs[i])
 		}
-		responseBuilder(chs)
+		go responseBuilder(chs)
+		initChs(chs)
 	}
 }
 
